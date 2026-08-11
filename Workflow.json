@@ -1,0 +1,497 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "YOUR_DRIVE_FOLDER_ID",
+          "mode": "id"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "52b64bb8-1dc8-45ed-ab0a-16b54d97ec1c",
+      "name": "Google Drive Trigger (New Audio File)",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1440,
+        96
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "b29BAH2cbgenTV0v",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Google Drive Trigger (New Audio File)').item.json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "d2adfe2d-d5b8-498c-b9e3-4444338b3ef1",
+      "name": "Download Audio File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -544,
+        96
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "b29BAH2cbgenTV0v",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model",
+              "value": "whisper-large-v3"
+            },
+            {
+              "name": "response_format",
+              "value": "json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3098e6a2-0433-42e4-bce3-f1395b5e8546",
+      "name": "Groq Whisper Transcription",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a professional meeting intelligence assistant. Analyze the meeting transcript and return ONLY valid JSON using exactly this structure: {\\\"summary\\\":\\\"A concise summary of the meeting\\\",\\\"key_decisions\\\":[\\\"Decision 1\\\",\\\"Decision 2\\\"],\\\"action_items\\\":[{\\\"task\\\":\\\"Task description\\\",\\\"owner\\\":\\\"Person responsible\\\",\\\"deadline\\\":\\\"Deadline or Not specified\\\"}]}. Rules: Extract only decisions explicitly made or clearly agreed upon. Do not invent decisions. Extract actionable tasks with their owner and deadline when available. If no key decisions exist, return an empty array. If no action items exist, return an empty array. Return ONLY valid JSON. No markdown. No explanation outside the JSON.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"={{ $json.text }}\"\n    }\n  ],\n  \"temperature\": 0.2\n}",
+        "options": {}
+      },
+      "id": "04cd5bde-575b-43e4-8395-0ee606a21f6d",
+      "name": "Groq LLM - Summarize + Extract Action Items",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -80,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.choices[0].message.content;\n\nlet parsed;\n\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  parsed = {\n    summary: raw,\n    key_decisions: [],\n    action_items: []\n  };\n}\n\nconst actionItems = parsed.action_items || [];\nconst keyDecisions = parsed.key_decisions || [];\n\nconst actionItemsText = actionItems\n  .map(a => `- ${a.task} (Owner: ${a.owner}, Deadline: ${a.deadline})`)\n  .join('\\n');\n\nconst keyDecisionsText = keyDecisions\n  .map(d => `- ${d}`)\n  .join('\\n');\n\nreturn [{\n  json: {\n    summary: parsed.summary || 'No summary generated.',\n    action_items_text: actionItemsText || 'No action items detected.',\n    key_decisions_text: keyDecisionsText || 'No key decisions detected.',\n    action_items_raw: actionItems,\n    key_decisions_raw: keyDecisions,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "c4753c4c-df6d-414b-9a65-26f33502e3cc",
+      "name": "Format Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "your-email@example.com",
+        "subject": "=Meeting Intelligence Report — {{ $now.format('dd LLL yyyy, HH:mm') }}",
+        "emailType": "text",
+        "message": "=Hello,\n\nHere is your AI-generated meeting report.\n\n📌 MEETING SUMMARY\n\n{{ $json.summary }}\n\n🎯 KEY DECISIONS\n\n{{ $json.key_decisions_text }}\n\n✅ ACTION ITEMS\n\n{{ $json.action_items_text }}\n\nThis report was automatically generated by the AI Meeting Intelligence & Automation workflow.\n\nBest regards,\nAI Meeting Assistant",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "900b5a7d-be84-4e80-9623-bab12c407642",
+      "name": "Send Summary Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        432,
+        -64
+      ],
+      "webhookId": "7cbf642f-7f8a-42a4-886b-7599b73789c9",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "LhA2dv0acFXohRre",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Meeting Records",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $now }}",
+            "Key Decisions": "={{ $json.key_decisions_text }}",
+            "Meeting File": "={{ $('Google Drive Trigger (New Audio File)').item.json.name }}",
+            "Action Items": "={{ $json.action_items_text }}",
+            "Summary": "={{ $json.summary }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Meeting File",
+              "displayName": "Meeting File",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Summary",
+              "displayName": "Summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Action Items",
+              "displayName": "Action Items",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Key Decisions",
+              "displayName": "Key Decisions",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "c1426c61-2be3-4f69-adb0-9a39bee4d805",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        208
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "5bVcqIfbdmtciPNs",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Meeting Records",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Meeting File",
+              "lookupValue": "={{ $('Google Drive Trigger (New Audio File)').item.json.name }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a8db821e-6503-4901-8878-61851bd13d26",
+      "name": "Check Existing File",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -992,
+        80
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "5bVcqIfbdmtciPNs",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "duplicate-check",
+              "leftValue": "={{ $json[\"Meeting File\"] }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ab052f05-bf89-4db5-a101-9c3bfe125fdf",
+      "name": "Duplicate Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -768,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "mp3-condition",
+              "leftValue": "={{ $json.name }}",
+              "rightValue": ".mp3",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            },
+            {
+              "id": "wav-condition",
+              "leftValue": "={{ $json.name }}",
+              "rightValue": ".wav",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            },
+            {
+              "id": "m4a-condition",
+              "leftValue": "={{ $json.name }}",
+              "rightValue": ".m4a",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "99c2b990-74a4-421d-8cfd-53bea167d377",
+      "name": "Validate Audio File1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1248,
+        96
+      ]
+    }
+  ],
+  "connections": {
+    "Google Drive Trigger (New Audio File)": {
+      "main": [
+        [
+          {
+            "node": "Validate Audio File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Audio File": {
+      "main": [
+        [
+          {
+            "node": "Groq Whisper Transcription",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Whisper Transcription": {
+      "main": [
+        [
+          {
+            "node": "Groq LLM - Summarize + Extract Action Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq LLM - Summarize + Extract Action Items": {
+      "main": [
+        [
+          {
+            "node": "Format Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Output": {
+      "main": [
+        [
+          {
+            "node": "Send Summary Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing File": {
+      "main": [
+        [
+          {
+            "node": "Duplicate Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate Check": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Download Audio File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Audio File1": {
+      "main": [
+        [
+          {
+            "node": "Check Existing File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "64392526e4336d2b2fc8eb7b0c5ad9d6c5b2f3ac0803236f04700084480c9bdc"
+  }
+}
